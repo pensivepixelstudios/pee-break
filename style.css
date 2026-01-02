@@ -74,6 +74,45 @@ html, body {
   .frame { padding: 10px; }
 }
 
+/* Fullscreen on mobile (keep desktop framed). */
+@media (max-width: 520px), (max-height: 520px) {
+  html, body {
+    height: 100%;
+    margin: 0;
+  }
+
+  .shell {
+    padding: 0;
+  }
+
+  .frame {
+    width: 100vw;
+    height: 100vh;
+    aspect-ratio: auto;
+    padding: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  #game {
+    border-radius: 0;
+  }
+
+  /* Respect notches / home indicators when available */
+  @supports (padding: max(0px)) {
+    .frame {
+      width: 100vw;
+      height: 100vh;
+      padding:
+        env(safe-area-inset-top)
+        env(safe-area-inset-right)
+        env(safe-area-inset-bottom)
+        env(safe-area-inset-left);
+      background: transparent;
+    }
+  }
+}
+
 .hint {
   display: none;
   position: absolute;
