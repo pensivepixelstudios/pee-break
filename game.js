@@ -75,6 +75,61 @@
     wantsStart: false,
   };
 
+  // --- Mobile tilt aim (deviceorientation) ---
+  const tilt = {
+    available: false,
+    enabled: false,
+    ok: false,
+    // raw angles
+    gamma: 0, // left/right
+    beta: 0, // front/back
+    // filtered angles
+    g: 0,
+    b: 0,
+  };
+
+  const isProbablyMobile =
+    (typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches) ||
+    (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0);
+  const isSecure = typeof window !== "undefined" && !!window.isSecureContext;
+
+  function enableTilt() {
+    if (tilt.enabled) return;
+    tilt.enabled = true;
+    tilt.available = true;
+
+    window.addEventListener(
+      "deviceorientation",
+      (ev) => {
+        if (typeof ev.gamma !== "number" || typeof ev.beta !== "number") return;
+        tilt.gamma = ev.gamma;
+        tilt.beta = ev.beta;
+        tilt.ok = true;
+      },
+      true
+    );
+  }
+
+  async function ensureTiltPermission() {
+    // iOS requires user-gesture permission; Android usually doesn't.
+    try {
+      if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
+        const res = await DeviceOrientationEvent.requestPermission();
+        if (res !== "granted") return false;
+      }
+      enableTilt();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // Android Chrome typically requires a secure context for motion sensors.
+  // Enable immediately when allowed; iOS will still require a user gesture to grant permission.
+  if (isProbablyMobile && isSecure && typeof DeviceOrientationEvent !== "undefined") {
+    enableTilt();
+  }
+
   const world = {
     state: State.START,
     t: 0,
@@ -293,6 +348,12 @@
     input.mx = p.x;
     input.my = p.y;
     input.justPressed = true;
+
+    // Always-on tilt aim for mobile: try to enable on first user gesture (needed on iOS).
+    if (isProbablyMobile && !tilt.enabled) {
+      // Fire-and-forget; if permission is denied, touch aiming still works.
+      ensureTiltPermission();
+    }
 
     // If run is finished: let the "Ahhhhhh" finish and return to menu automatically.
     if (world.state === State.DONE) {
@@ -573,6 +634,15 @@
     ctx.fillStyle = palette.fg2;
     ctx.fillText("Pensive Pixel Studios", (W / 2) | 0, (py + 46) | 0);
 
+    // If tilt is expected but blocked, hint why (only on the start panel).
+    if (isProbablyMobile && !isSecure) {
+      ctx.font = "10px ui-monospace, Menlo, Consolas, monospace";
+      ctx.fillStyle = "rgba(0,0,0,0.40)";
+      ctx.fillText("Tilt needs HTTPS (LAN http blocks sensors)", (W / 2) | 0, (py + 62 + 1) | 0);
+      ctx.fillStyle = palette.fg2;
+      ctx.fillText("Tilt needs HTTPS (LAN http blocks sensors)", (W / 2) | 0, (py + 62) | 0);
+    }
+
     ctx.restore();
   }
 
@@ -659,6 +729,29 @@
 
   // --- Simulation ---
   function updateZen(dt) {
+    // If tilt is active, continuously drive the aim point from device orientation.
+    // Touch aiming remains a fallback when tilt data isn't available.
+    if (tilt.enabled && tilt.ok) {
+      // Smooth the sensor a bit to avoid jitter.
+      const s = 1 - Math.pow(0.0008, dt); // ~snappy but stable
+      tilt.g = lerp(tilt.g, tilt.gamma, s);
+      tilt.b = lerp(tilt.b, tilt.beta, s);
+
+      // Clamp to a comfy range.
+      const g = clamp(tilt.g, -35, 35);
+      const b = clamp(tilt.b, -30, 30);
+
+      // Map tilt -> aim delta (tune these).
+      const sensX = 2.6;
+      const sensY = 2.2;
+      const dx = g * sensX;
+      const dy = b * sensY;
+
+      // Aim relative to player, biased forward into the canyon.
+      input.mx = clamp(player.x + 120 + dx, 0, W);
+      input.my = clamp(player.y + 40 + dy, 0, H);
+    }
+
     // Aim
     player.aimX = lerp(player.aimX, input.mx, 1 - Math.pow(0.001, dt));
     player.aimY = lerp(player.aimY, input.my, 1 - Math.pow(0.001, dt));
