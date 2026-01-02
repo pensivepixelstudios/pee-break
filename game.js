@@ -12,6 +12,7 @@
   const canvas = document.getElementById("game");
   const hintEl = document.getElementById("hint");
   const ctx = canvas.getContext("2d", { alpha: false });
+  // (unused) const frameEl = document.querySelector(".frame");
 
   let dpr = 1;
   function applyCanvasBackingStore() {
@@ -70,94 +71,11 @@
     mx: W / 2,
     my: H / 2,
     down: false,
+    contact: false, // pointer currently held down (dragging)
     justPressed: false,
     justReleased: false,
     wantsStart: false,
   };
-
-  // --- Mobile tilt aim (deviceorientation) ---
-  const tilt = {
-    available: false,
-    enabled: false,
-    ok: false,
-    // raw angles
-    gamma: 0, // left/right
-    beta: 0, // front/back
-    // motion fallback (derived from accelerationIncludingGravity)
-    hasMotion: false,
-    // filtered angles
-    g: 0,
-    b: 0,
-  };
-
-  const isProbablyMobile =
-    (typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches) ||
-    (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0);
-  const isSecure = typeof window !== "undefined" && !!window.isSecureContext;
-
-  function enableTilt() {
-    if (tilt.enabled) return;
-    tilt.enabled = true;
-    tilt.available = true;
-
-    window.addEventListener(
-      "deviceorientation",
-      (ev) => {
-        // Some browsers provide nulls unless permission/secure context is satisfied.
-        if (typeof ev.gamma === "number" && typeof ev.beta === "number") {
-          tilt.gamma = ev.gamma;
-          tilt.beta = ev.beta;
-          tilt.ok = true;
-        }
-      },
-      true
-    );
-
-    // Fallback: derive tilt from gravity vector.
-    window.addEventListener(
-      "devicemotion",
-      (ev) => {
-        const ag = ev.accelerationIncludingGravity;
-        if (!ag) return;
-        const ax = ag.x;
-        const ay = ag.y;
-        const az = ag.z;
-        if (typeof ax !== "number" || typeof ay !== "number" || typeof az !== "number") return;
-
-        // Compute pitch/roll from gravity vector (approx).
-        // pitch: rotation around X axis (front/back), roll: rotation around Y axis (left/right)
-        const pitch = Math.atan2(-ax, Math.sqrt(ay * ay + az * az));
-        const roll = Math.atan2(ay, az);
-
-        // Convert to degrees. Map into beta/gamma-like ranges.
-        tilt.beta = (pitch * 180) / Math.PI;
-        tilt.gamma = (roll * 180) / Math.PI;
-        tilt.hasMotion = true;
-        tilt.ok = true;
-      },
-      true
-    );
-  }
-
-  async function ensureTiltPermission() {
-    // iOS requires user-gesture permission; Android usually doesn't.
-    try {
-      if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
-        const res = await DeviceOrientationEvent.requestPermission();
-        if (res !== "granted") return false;
-      }
-      enableTilt();
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  // Try to enable tilt immediately. Some platforms will only start producing values after a user gesture,
-  // but attaching listeners early is harmless and improves reliability on Android variants.
-  if (typeof DeviceOrientationEvent !== "undefined" || typeof DeviceMotionEvent !== "undefined") {
-    enableTilt();
-  }
 
   const world = {
     state: State.START,
@@ -195,7 +113,8 @@
   /** @type {{x:number,y:number,r:number,life:number,ttl:number}[]} */
   const ripples = [];
 
-  const RIM_Y = 64;
+  // Lower rim => more sky at the top (easier to aim high).
+  const RIM_Y = 80;
   const headBoops = {
     nextAt: 0,
     startAt: 0,
@@ -331,16 +250,10 @@
     if (Math.abs(dx) + Math.abs(dy) < 0.001) dy = 1;
 
     const base = Math.atan2(dy, dx);
-    // Slight spread for a "stream" feel, but keep it controllable at long range.
-    // (Too much spread + drag = edge shots sometimes fall short.)
-    // Tighter cone => neater stream.
-    // Tighter cone => narrow stream.
     const spread = rand(-0.02, 0.02) * (0.40 + (1 - strength01) * 0.12);
     const a = base + spread;
 
-    // Lower-pressure stream (less fountain-y), but still reaches into the canyon.
-    // Slightly lower speed helps reduce spacing between drops at a fixed emission rate.
-    const speed = lerp(1.45, 2.85, strength01) + rand(-0.03, 0.08);
+    const speed = lerp(1.8, 3.4, strength01) + rand(-0.03, 0.08);
 
     const vx = Math.cos(a) * speed;
     const vy = Math.sin(a) * speed;
@@ -377,12 +290,7 @@
     input.mx = p.x;
     input.my = p.y;
     input.justPressed = true;
-
-    // Always-on tilt aim for mobile: try to enable on first user gesture (needed on iOS).
-    if (isProbablyMobile && !tilt.enabled) {
-      // Fire-and-forget; if permission is denied, touch aiming still works.
-      ensureTiltPermission();
-    }
+    input.contact = true;
 
     // If run is finished: let the "Ahhhhhh" finish and return to menu automatically.
     if (world.state === State.DONE) {
@@ -414,6 +322,11 @@
   );
 
   canvas.addEventListener("pointermove", (ev) => {
+    // Desktop: aim follows mouse without needing to hold.
+    // Mobile: require an active drag (prevents accidental aim jitter while peeing).
+    const coarse =
+      typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;
+    if (coarse && !input.contact) return;
     const p = toGameCoords(ev);
     input.mx = p.x;
     input.my = p.y;
@@ -424,6 +337,7 @@
     input.mx = p.x;
     input.my = p.y;
     // Don't stop peeing on release; stream is tap-to-start and ends when pee runs out.
+    input.contact = false;
     input.justReleased = true;
   });
 
@@ -663,37 +577,40 @@
     ctx.fillStyle = palette.fg2;
     ctx.fillText("Pensive Pixel Studios", (W / 2) | 0, (py + 46) | 0);
 
-    // If tilt is expected but blocked, hint why (only on the start panel).
-    if (isProbablyMobile && !isSecure) {
-      ctx.font = "10px ui-monospace, Menlo, Consolas, monospace";
-      ctx.fillStyle = "rgba(0,0,0,0.40)";
-      ctx.fillText("Tilt needs HTTPS (LAN http blocks sensors)", (W / 2) | 0, (py + 62 + 1) | 0);
-      ctx.fillStyle = palette.fg2;
-      ctx.fillText("Tilt needs HTTPS (LAN http blocks sensors)", (W / 2) | 0, (py + 62) | 0);
-    }
-
     ctx.restore();
   }
 
-  function drawTiltStatus() {
-    // Minimal debug HUD, only when tilt is not producing data.
-    if (!isProbablyMobile) return;
-    if (tilt.ok) return;
-    if (!tilt.enabled) return;
+  function drawPeeDots() {
+    // Simple 5-dot meter across the top. Drains linearly via per-dot fade.
+    // Hide on the static menu; allow during fade (since you can already pee).
+    if (world.state === State.START || world.state === State.START_IN) return;
+    if (world.state === State.DONE_WAIT || world.state === State.DONE) return;
+    if (UNLIMITED_PEE) return;
+
+    const p = clamp(world.peeLeft, 0, 1);
+    const n = 5;
+
+    const y = 10;
+    const r = 2; // dot radius in px (internal res)
+    const x0 = 14;
+    const x1 = W - 14;
+    const step = (x1 - x0) / (n - 1);
 
     ctx.save();
-    ctx.globalAlpha = 0.75;
-    ctx.fillStyle = "rgba(255,255,255,0.08)";
-    ctx.fillRect(8, H - 26, 224, 18);
-    ctx.strokeStyle = "rgba(0,0,0,0.25)";
-    ctx.strokeRect(8.5, H - 25.5, 224, 18);
+    ctx.fillStyle = palette.fg; // black dots
 
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    ctx.font = "10px ui-monospace, Menlo, Consolas, monospace";
-    ctx.fillStyle = palette.fg2;
-    const msg = isSecure ? "Tilt: no sensor data yet (check site settings: Motion sensors)" : "Tilt: blocked on HTTP (use HTTPS)";
-    ctx.fillText(msg, 14, H - 23);
+    // Rightmost dot fades first (like a battery draining).
+    const units = p * n;
+    for (let i = 0; i < n; i++) {
+      const v = clamp(units - i, 0, 1);
+      if (v <= 0) continue;
+      ctx.globalAlpha = v;
+      const x = (x0 + i * step) | 0;
+      // Pixel "dot"
+      ctx.fillRect(x - r, y - r, r * 2 + 1, r * 2 + 1);
+    }
+
+    ctx.globalAlpha = 1;
     ctx.restore();
   }
 
@@ -732,14 +649,16 @@
 
     // Near-player placement (no bubble): slightly above and to the right.
     const x = clamp(player.x + 10, 8, W - 120);
-    const baseY = clamp(player.y - 64, 16, H - 40);
+    // Move Ahhh a bit lower (closer to the player / less in the sky).
+    const baseY = clamp(player.y - 52, 16, H - 40);
     // Exhale motion: gentle upward drift + a tiny float.
     const y = baseY - drift01 * 12 + Math.sin(world.t * 1.1) * 0.8;
 
     ctx.save();
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
-    ctx.font = "22px ui-monospace, Menlo, Consolas, monospace";
+    // Match the start-screen title font.
+    ctx.font = "18px ui-monospace, Menlo, Consolas, monospace";
 
     // Scale around the text anchor for a subtle overshoot/settle.
     ctx.translate(x, y);
@@ -766,7 +685,7 @@
     drawDrops();
     drawParticles();
     drawToiletMan();
-    drawTiltStatus();
+    // drawPeeDots();
 
     if (world.state === State.START || world.state === State.START_IN || world.state === State.START_FADING) {
       drawStartOverlay(world.startFade);
@@ -781,37 +700,6 @@
 
   // --- Simulation ---
   function updateZen(dt) {
-    // If tilt is active, continuously drive the aim point from device orientation.
-    // Touch aiming remains a fallback when tilt data isn't available.
-    if (tilt.enabled && tilt.ok) {
-      // Smooth the sensor a bit to avoid jitter.
-      const s = 1 - Math.pow(0.0008, dt); // ~snappy but stable
-      tilt.g = lerp(tilt.g, tilt.gamma, s);
-      tilt.b = lerp(tilt.b, tilt.beta, s);
-
-      // Clamp to a comfy range.
-      const g = clamp(tilt.g, -35, 35);
-      const b = clamp(tilt.b, -30, 30);
-
-      // Map tilt -> aim delta (tuned for "small tilt = big effect", but saturating).
-      // Feel knobs:
-      // - curve < 1: more responsive near center
-      // - maxDx/maxDy: overall reach
-      const curve = 0.65;
-      const maxDx = 120;
-      const maxDy = 90;
-      const nx = clamp(g / 35, -1, 1);
-      const ny = clamp(b / 30, -1, 1);
-      const fx = Math.sign(nx) * Math.pow(Math.abs(nx), curve);
-      const fy = Math.sign(ny) * Math.pow(Math.abs(ny), curve);
-      const dx = fx * maxDx;
-      const dy = fy * maxDy;
-
-      // Aim relative to player, biased forward into the canyon.
-      input.mx = clamp(player.x + 120 + dx, 0, W);
-      input.my = clamp(player.y + 40 + dy, 0, H);
-    }
-
     // Aim
     player.aimX = lerp(player.aimX, input.mx, 1 - Math.pow(0.001, dt));
     player.aimY = lerp(player.aimY, input.my, 1 - Math.pow(0.001, dt));
