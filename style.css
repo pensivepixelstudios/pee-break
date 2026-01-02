@@ -38,6 +38,16 @@ html, body {
     0 1px 0 rgba(255,255,255,0.06) inset;
 }
 
+#game,
+.frame {
+  transition:
+    width 0.45s ease,
+    height 0.45s ease,
+    padding 0.45s ease,
+    border-radius 0.45s ease,
+    box-shadow 0.45s ease;
+}
+
 .ghlink {
   position: absolute;
   top: 10px;
@@ -76,6 +86,11 @@ html, body {
 
 /* Fullscreen on mobile (keep desktop framed), without stretching the game. */
 @media (max-width: 520px), (max-height: 520px) {
+  html, body {
+    /* Match game silhouette ink (palette.fg in game.js) */
+    background: #0b0b10;
+  }
+
   .shell {
     padding: 0;
     place-items: stretch;
@@ -93,7 +108,8 @@ html, body {
       env(safe-area-inset-left);
     border-radius: 0;
     box-shadow: none;
-    background: transparent;
+    /* Letterbox/safe-area bars should match silhouette ink on phone. */
+    background: #0b0b10;
     display: grid;
     place-items: center;
   }
@@ -111,6 +127,38 @@ html, body {
       calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)),
       calc(100vw * 3 / 2)
     );
+  }
+}
+
+/* Desktop: smoothly expand to an immersive, fullscreen max-fit after first click. */
+@media (min-width: 521px) and (min-height: 521px) {
+  body.immersive {
+    /* Match game silhouette ink (palette.fg in game.js) */
+    background: #0b0b10;
+  }
+
+  body.immersive .shell {
+    padding: 0;
+    place-items: stretch;
+  }
+
+  body.immersive .frame {
+    width: 100vw;
+    height: 100vh;
+    aspect-ratio: auto;
+    padding: 0;
+    border-radius: 0;
+    box-shadow: none;
+    /* Letterbox around the max-fit canvas */
+    background: #0b0b10;
+    display: grid;
+    place-items: center;
+  }
+
+  body.immersive #game {
+    border-radius: 0;
+    width: min(100vw, calc(100vh * 2 / 3));
+    height: min(100vh, calc(100vw * 3 / 2));
   }
 }
 
