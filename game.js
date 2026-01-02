@@ -793,11 +793,19 @@
       const g = clamp(tilt.g, -35, 35);
       const b = clamp(tilt.b, -30, 30);
 
-      // Map tilt -> aim delta (tune these).
-      const sensX = 2.6;
-      const sensY = 2.2;
-      const dx = g * sensX;
-      const dy = b * sensY;
+      // Map tilt -> aim delta (tuned for "small tilt = big effect", but saturating).
+      // Feel knobs:
+      // - curve < 1: more responsive near center
+      // - maxDx/maxDy: overall reach
+      const curve = 0.65;
+      const maxDx = 120;
+      const maxDy = 90;
+      const nx = clamp(g / 35, -1, 1);
+      const ny = clamp(b / 30, -1, 1);
+      const fx = Math.sign(nx) * Math.pow(Math.abs(nx), curve);
+      const fy = Math.sign(ny) * Math.pow(Math.abs(ny), curve);
+      const dx = fx * maxDx;
+      const dy = fy * maxDy;
 
       // Aim relative to player, biased forward into the canyon.
       input.mx = clamp(player.x + 120 + dx, 0, W);
