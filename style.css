@@ -74,42 +74,43 @@ html, body {
   .frame { padding: 10px; }
 }
 
-/* Fullscreen on mobile (keep desktop framed). */
+/* Fullscreen on mobile (keep desktop framed), without stretching the game. */
 @media (max-width: 520px), (max-height: 520px) {
-  html, body {
-    height: 100%;
-    margin: 0;
-  }
-
   .shell {
     padding: 0;
+    place-items: stretch;
   }
 
   .frame {
     width: 100vw;
-    height: 100vh;
+    height: 100vh; /* fallback */
+    height: 100dvh; /* Android/iOS dynamic viewport (avoids bottom bar overlap) */
     aspect-ratio: auto;
-    padding: 0;
+    padding:
+      env(safe-area-inset-top)
+      env(safe-area-inset-right)
+      env(safe-area-inset-bottom)
+      env(safe-area-inset-left);
     border-radius: 0;
     box-shadow: none;
+    background: transparent;
+    display: grid;
+    place-items: center;
   }
 
+  /* Keep the game at its intended 2:3 aspect ratio while fitting the viewport. */
   #game {
     border-radius: 0;
-  }
-
-  /* Respect notches / home indicators when available */
-  @supports (padding: max(0px)) {
-    .frame {
-      width: 100vw;
-      height: 100vh;
-      padding:
-        env(safe-area-inset-top)
-        env(safe-area-inset-right)
-        env(safe-area-inset-bottom)
-        env(safe-area-inset-left);
-      background: transparent;
-    }
+    width: min(
+      100vw,
+      calc(
+        (100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) * 2 / 3
+      )
+    );
+    height: min(
+      calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)),
+      calc(100vw * 3 / 2)
+    );
   }
 }
 
