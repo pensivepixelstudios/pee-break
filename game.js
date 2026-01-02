@@ -20,7 +20,7 @@
     canvas.height = Math.round(H * dpr);
     // Draw in logical (W/H) units.
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.imageSmoothingEnabled = false;
+  ctx.imageSmoothingEnabled = false;
   }
   applyCanvasBackingStore();
 
@@ -83,6 +83,8 @@
     // raw angles
     gamma: 0, // left/right
     beta: 0, // front/back
+    // motion fallback (derived from accelerationIncludingGravity)
+    hasMotion: false,
     // filtered angles
     g: 0,
     b: 0,
@@ -101,9 +103,36 @@
     window.addEventListener(
       "deviceorientation",
       (ev) => {
-        if (typeof ev.gamma !== "number" || typeof ev.beta !== "number") return;
-        tilt.gamma = ev.gamma;
-        tilt.beta = ev.beta;
+        // Some browsers provide nulls unless permission/secure context is satisfied.
+        if (typeof ev.gamma === "number" && typeof ev.beta === "number") {
+          tilt.gamma = ev.gamma;
+          tilt.beta = ev.beta;
+          tilt.ok = true;
+        }
+      },
+      true
+    );
+
+    // Fallback: derive tilt from gravity vector.
+    window.addEventListener(
+      "devicemotion",
+      (ev) => {
+        const ag = ev.accelerationIncludingGravity;
+        if (!ag) return;
+        const ax = ag.x;
+        const ay = ag.y;
+        const az = ag.z;
+        if (typeof ax !== "number" || typeof ay !== "number" || typeof az !== "number") return;
+
+        // Compute pitch/roll from gravity vector (approx).
+        // pitch: rotation around X axis (front/back), roll: rotation around Y axis (left/right)
+        const pitch = Math.atan2(-ax, Math.sqrt(ay * ay + az * az));
+        const roll = Math.atan2(ay, az);
+
+        // Convert to degrees. Map into beta/gamma-like ranges.
+        tilt.beta = (pitch * 180) / Math.PI;
+        tilt.gamma = (roll * 180) / Math.PI;
+        tilt.hasMotion = true;
         tilt.ok = true;
       },
       true
@@ -124,9 +153,9 @@
     }
   }
 
-  // Android Chrome typically requires a secure context for motion sensors.
-  // Enable immediately when allowed; iOS will still require a user gesture to grant permission.
-  if (isProbablyMobile && isSecure && typeof DeviceOrientationEvent !== "undefined") {
+  // Try to enable tilt immediately. Some platforms will only start producing values after a user gesture,
+  // but attaching listeners early is harmless and improves reliability on Android variants.
+  if (typeof DeviceOrientationEvent !== "undefined" || typeof DeviceMotionEvent !== "undefined") {
     enableTilt();
   }
 
@@ -233,7 +262,7 @@
       x,
       y,
       r: 1.5,
-      life: 0,
+        life: 0,
       ttl: rand(1.4, 2.4),
     });
   }
@@ -646,6 +675,28 @@
     ctx.restore();
   }
 
+  function drawTiltStatus() {
+    // Minimal debug HUD, only when tilt is not producing data.
+    if (!isProbablyMobile) return;
+    if (tilt.ok) return;
+    if (!tilt.enabled) return;
+
+    ctx.save();
+    ctx.globalAlpha = 0.75;
+    ctx.fillStyle = "rgba(255,255,255,0.08)";
+    ctx.fillRect(8, H - 26, 224, 18);
+    ctx.strokeStyle = "rgba(0,0,0,0.25)";
+    ctx.strokeRect(8.5, H - 25.5, 224, 18);
+
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.font = "10px ui-monospace, Menlo, Consolas, monospace";
+    ctx.fillStyle = palette.fg2;
+    const msg = isSecure ? "Tilt: no sensor data yet (check site settings: Motion sensors)" : "Tilt: blocked on HTTP (use HTTPS)";
+    ctx.fillText(msg, 14, H - 23);
+    ctx.restore();
+  }
+
   function drawAhhFade() {
     const total = world.ahhIn + world.ahhHold + world.ahhOut;
     const tt = clamp(world.ahhT, 0, total);
@@ -715,6 +766,7 @@
     drawDrops();
     drawParticles();
     drawToiletMan();
+    drawTiltStatus();
 
     if (world.state === State.START || world.state === State.START_IN || world.state === State.START_FADING) {
       drawStartOverlay(world.startFade);
@@ -854,9 +906,9 @@
         const xr = xRight(d.y);
         if (d.x <= xl + 1 || d.x >= xr - 1) {
           splat(d.x, d.y, d.vx * 0.15, d.vy * 0.15, 0.35);
-          drops.splice(i, 1);
-          continue;
-        }
+        drops.splice(i, 1);
+        continue;
+      }
 
         const fy = floorY(d.x);
         if (d.y >= fy) {
