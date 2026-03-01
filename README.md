@@ -1,6 +1,6 @@
 ## Pee Break
 
-The most Zen game on the Internet. 
+The most zen game on the Internet. 
 
 Play it here: 
 
